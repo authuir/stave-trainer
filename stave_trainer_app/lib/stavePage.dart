@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:collection';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_midi_command/flutter_midi_command.dart';
 import 'package:stave_trainer_app/staveCanvasPainter.dart';
+import 'package:stave_trainer_app/util.dart';
 
 class StavePage extends StatefulWidget {
   StavePage({Key key, this.title}) : super(key: key);
@@ -17,23 +20,34 @@ class StavePage extends StatefulWidget {
 
 class _StavePageState extends State<StavePage> {
   String text = 'Test';
+  int score = 0;
+  int life = 5;
   String btnConnectText = 'Connect Device';
   bool isConnected = false;
-  Map<int, int> noteMap = new Map();
+  bool isStartTrain = false;
+  SplayTreeMap<int, int> noteMap = new SplayTreeMap();
+  SplayTreeMap<int, int> noteMapTest = new SplayTreeMap();
   MidiDevice device;
   Timer t;
+  Timer timer;
 
   static const int CMD_UP = 128;
   static const int CMD_DOWN = 144;
 
-  int debugC = 60;
   void handleTimeout(Timer t) {
-    // callback function
+    // if (this.isStartTrain) {
+    //   setRandomTest();
+    // }
+  }
+
+  void setRandomTest() {
+    this.noteMapTest.clear();
+    var rng = new Random();
+    var randomKey =
+        Util.noteMapTestLib[rng.nextInt(Util.noteMapTestLib.length)];
     setState(() {
-      this.noteMap[debugC++] = debugC;
-      debugC++;
+      this.noteMapTest[randomKey] = 100;
     });
-    print(debugC);
   }
 
   @override
@@ -44,8 +58,7 @@ class _StavePageState extends State<StavePage> {
 
   void initDevice() async {
     String temp = '';
-    this.t = new Timer.periodic(Duration(seconds: 3), handleTimeout);
-    this.t.cancel();
+    this.t = new Timer.periodic(Duration(seconds: 1), handleTimeout);
     var devices = await MidiCommand().devices;
     devices.forEach((k) => temp += ' [' + k.name + '] ');
     temp += ' [' + devices.toString() + '] ';
@@ -55,9 +68,9 @@ class _StavePageState extends State<StavePage> {
   }
 
   void _onMidiDataReceived(Uint8List data) {
-    setState(() {
-      this.text = data.toString() + 'length: ${data.length}';
-    });
+    // setState(() {
+    //   this.text = data.toString() + 'length: ${data.length}';
+    // });
     if (data.length <= 0 || data.length % 3 != 0) {
       return;
     }
@@ -66,10 +79,24 @@ class _StavePageState extends State<StavePage> {
         setState(() {
           this.noteMap[data[i + 1]] = data[i + 2];
         });
+
+        if (this.noteMapTest[data[i + 1]] != null) {
+          setState(() {
+            this.score++;
+          });
+        } else {
+          this.life--;
+          if (this.life <= 0) {
+            this._stopTrain();
+          }
+        }
       } else if (data[i] == CMD_UP) {
         setState(() {
           this.noteMap.remove(data[i + 1]);
         });
+        if (this.isStartTrain) {
+          this.timer = new Timer(Duration(seconds: 1), setRandomTest);
+        }
       }
     }
   }
@@ -79,6 +106,34 @@ class _StavePageState extends State<StavePage> {
       _disconnectDevice();
     } else {
       _connectDevice();
+    }
+  }
+
+  void _trainBtn() {
+    if (this.isStartTrain) {
+      _stopTrain();
+    } else {
+      _startTrain();
+    }
+  }
+
+  void _startTrain() async {
+    if (!this.isStartTrain) {
+      setState(() {
+        this.isStartTrain = true;
+        this.score = 0;
+        this.life = 5;
+      });
+    }
+    this.setRandomTest();
+  }
+
+  void _stopTrain() async {
+    if (this.isStartTrain) {
+      setState(() {
+        this.isStartTrain = false;
+        this.text = 'Game Over, final score: ${this.score.toString()}';
+      });
     }
   }
 
@@ -125,11 +180,30 @@ class _StavePageState extends State<StavePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              Container(
-                child: ElevatedButton(
-                  onPressed: _deviceBtn,
-                  child: Text(this.btnConnectText),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: <Widget>[
+                  SizedBox(width: 14),
+                  ElevatedButton(
+                      onPressed: _deviceBtn, child: Text(this.btnConnectText)),
+                  SizedBox(width: 10),
+                  ElevatedButton(
+                      onPressed: _trainBtn,
+                      child: Text(
+                          this.isStartTrain ? 'Stop Train' : 'Start Train'),
+                      style: ButtonStyle(
+                          backgroundColor: MaterialStateProperty.all<Color>(
+                              this.isStartTrain ? Colors.pink : Colors.green))),
+                  SizedBox(width: 10),
+                  Text(
+                    'Score: ${this.score.toString()}',
+                    textDirection: TextDirection.ltr,
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
               ),
               Container(
                 child: Text(
@@ -149,8 +223,9 @@ class _StavePageState extends State<StavePage> {
                       width: 5.0,
                     )),
                 child: CustomPaint(
-                  painter: StaveCanvasPainter(this.noteMap),
-                  size: Size(660, 100),
+                  painter:
+                      StaveCanvasPainter(this.noteMap, this.noteMapTest, true),
+                  size: Size(660, 200),
                 ),
               )
             ],

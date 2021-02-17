@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -5,43 +7,24 @@ import 'dart:typed_data';
 import 'dart:ui' as UI;
 
 import 'package:flutter/services.dart';
-
-class StaveCanvas {
-  static const int C4 = 60;
-  static const int C4R = 61;
-  static const int D4 = 62;
-  static const int D4R = 63;
-  static const int E4 = 64;
-  static const int F4 = 65;
-  static const int F4R = 66;
-  static const int G4 = 67;
-  static const int G4R = 68;
-  static const int A4 = 69;
-  static const int A4R = 70;
-  static const int B4 = 71;
-  static const int B4R = 72;
-
-  static const int C5 = 73;
-  static const int C5R = 74;
-  static const int D5 = 75;
-  static const int D5R = 76;
-  static const int E5 = 77;
-  static const int F5 = 78;
-  static const int F5R = 79;
-  static const int G5 = 80;
-  static const int G5R = 81;
-  static const int A5 = 82;
-  static const int A5R = 83;
-  static const int B5 = 84;
-  static const int B5R = 85;
-  static UI.Image symbol;
-}
+import 'package:stave_trainer_app/util.dart';
 
 class StaveCanvasPainter extends CustomPainter {
-  static const double height = 14;
+  // The height of the first line of Stave
+  static const double initHeight = 70;
+  // Stave lines staveInterval
+  static const double staveInterval = 14;
   static const double noteWidth = 18;
   static const double noteHeight = 14;
-  Map<int, int> noteMap;
+  static UI.Image symbolClefG;
+  static UI.Image symbolClefF;
+
+  Paint blackPaint = Paint();
+  Paint greenPaint = Paint();
+  Paint redPaint = Paint();
+  SplayTreeMap<int, int> noteMap;
+  SplayTreeMap<int, int> noteMapTest;
+  bool isClefG = true;
   Map<int, double> notePositionMap = new Map();
 
   Future<UI.Image> loadUiImage(String imageAssetPath) async {
@@ -53,64 +36,124 @@ class StaveCanvasPainter extends CustomPainter {
     return completer.future;
   }
 
-  StaveCanvasPainter(Map<int, int> noteMap) {
+  StaveCanvasPainter(SplayTreeMap<int, int> noteMap,
+      SplayTreeMap<int, int> noteMapTest, bool isClefG) {
+    var c4Height = initHeight + staveInterval * 4.5;
     this.noteMap = noteMap;
-    var noteArray = [
-      StaveCanvas.C4,
-      StaveCanvas.D4,
-      StaveCanvas.E4,
-      StaveCanvas.F4,
-      StaveCanvas.G4,
-      StaveCanvas.A4,
-      StaveCanvas.B4,
-      StaveCanvas.C5,
-      StaveCanvas.D5,
-      StaveCanvas.E5,
-      StaveCanvas.F5,
-      StaveCanvas.G5,
-      StaveCanvas.A5,
-      StaveCanvas.B5,
-    ];
-    var xg = 6.5;
-    for (final note in noteArray) {
-      xg -= 0.5;
-      notePositionMap[note] = height * xg;
-    }
+    this.noteMapTest = noteMapTest;
 
-    loadUiImage("img/btn.png").then((s) => {StaveCanvas.symbol = s});
+    blackPaint.color = Colors.black;
+    blackPaint.strokeWidth = 2;
+    greenPaint.color = Colors.green;
+    greenPaint.strokeWidth = 2;
+    redPaint.color = Colors.red;
+    redPaint.strokeWidth = 2;
+    this.isClefG = isClefG;
+    this.notePositionMap = initNotePositionMap(
+        this.notePositionMap, c4Height, staveInterval, isClefG);
+    loadUiImage("img/ClefG.png")
+        .then((s) => {StaveCanvasPainter.symbolClefG = s});
+    loadUiImage("img/ClefF.png")
+        .then((s) => {StaveCanvasPainter.symbolClefF = s});
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    var paint = Paint();
-    paint.color = Colors.black;
-    paint.strokeWidth = 2;
-    double initHeight = 20;
+    this.drawStave(canvas, size);
+    this.drawNote(canvas, this.noteMap, true);
+    this.drawNote(canvas, this.noteMapTest, false);
+  }
 
-    if (StaveCanvas.symbol != null) {
-      canvas.drawImageRect(StaveCanvas.symbol, Rect.fromLTWH(0, 0, 1000, 2000),
-          Rect.fromLTWH(10, 10, 150, 300), paint);
+  void drawStave(Canvas canvas, Size size) {
+    // Draw Clef
+    if (StaveCanvasPainter.symbolClefG != null) {
+      canvas.drawImageRect(
+          StaveCanvasPainter.symbolClefG,
+          Rect.fromLTWH(0, 0, 1000, 2000),
+          Rect.fromLTWH(10, initHeight - 10, 150, 300),
+          blackPaint);
     }
 
+    var staveLineHeight = initHeight;
     for (int i = 0; i < 5; i++) {
-      canvas.drawLine(
-          Offset(0, initHeight), Offset(size.width, initHeight), paint);
-      initHeight += height;
+      canvas.drawLine(Offset(0, staveLineHeight),
+          Offset(size.width, staveLineHeight), blackPaint);
+      staveLineHeight += staveInterval;
     }
+  }
 
-    if (this.noteMap == null) {
+  void drawNote(
+      Canvas canvas, SplayTreeMap<int, int> noteMap, bool isUserInput) {
+    if (noteMap == null) {
       return;
     }
 
-    this.noteMap.forEach((k, v) => {
-          if (this.notePositionMap[k] != null)
-            {
-              canvas.drawOval(
-                  Rect.fromLTWH(
-                      100, this.notePositionMap[k], noteWidth, noteHeight),
-                  paint)
-            }
-        });
+    double noteStartLeftMargin = 100;
+    var lastNote;
+
+    noteMap.forEach((k, v) {
+      double noteLeftMargin = noteStartLeftMargin;
+      if (lastNote != null && lastNote == (k - 1)) {
+        noteLeftMargin += noteWidth;
+      }
+
+      if (isUserInput) {
+        noteLeftMargin += 100;
+      }
+
+      // Draw additional lines for notes outside the stave
+      if (isClefG && k < PianoNote.E4 && this.notePositionMap[k] != null) {
+        var c4LineHeight =
+            this.notePositionMap[PianoNote.C4] + staveInterval * 0.5;
+        var positionHeight = this.notePositionMap[k] + staveInterval * 0.5;
+        double number = -1;
+        if (positionHeight >= c4LineHeight) {
+          number = (positionHeight - c4LineHeight) / staveInterval + 0.5;
+        }
+
+        for (int i = 0; i < number; i++) {
+          canvas.drawLine(
+              Offset(noteLeftMargin - 5, c4LineHeight + i * staveInterval),
+              Offset(noteLeftMargin + noteWidth + 5,
+                  c4LineHeight + i * staveInterval),
+              blackPaint);
+        }
+      }
+
+      if (isClefG && k > PianoNote.F4 && this.notePositionMap[k] != null) {
+        var a5LineHeight =
+            this.notePositionMap[PianoNote.A5] + staveInterval * 0.5;
+        var positionHeight = this.notePositionMap[k] + staveInterval * 0.5;
+        double number = -1;
+        if (positionHeight <= a5LineHeight) {
+          number = (a5LineHeight - positionHeight) / staveInterval + 0.5;
+        }
+
+        for (int i = 0; i < number; i++) {
+          canvas.drawLine(
+              Offset(noteLeftMargin - 5, a5LineHeight - i * staveInterval),
+              Offset(noteLeftMargin + noteWidth + 5,
+                  a5LineHeight - i * staveInterval),
+              blackPaint);
+        }
+      }
+
+      var paint = this.blackPaint;
+
+      if (isUserInput && this.noteMapTest[k] != null) {
+        paint = this.greenPaint;
+      } else if (isUserInput && this.noteMapTest[k] == null) {
+        paint = this.redPaint;
+      }
+
+      if (this.notePositionMap[k] != null) {
+        canvas.drawOval(
+            Rect.fromLTWH(
+                noteLeftMargin, this.notePositionMap[k], noteWidth, noteHeight),
+            paint);
+      }
+      lastNote = k;
+    });
   }
 
   @override
